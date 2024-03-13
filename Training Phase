@@ -1,0 +1,123 @@
+# 导入所需的库
+import pandas as pd  # 数据处理库
+from sklearn.model_selection import train_test_split  # 数据集划分库
+from transformers import BertTokenizer  # Bert 分词器
+from tqdm import tqdm  # 进度条库
+from torch.utils.data import Dataset, DataLoader  # PyTorch 数据处理相关库
+import torch  # PyTorch 库
+from transformers import BertForSequenceClassification, AdamW  # Bert 文本分类模型及优化器
+import matplotlib.pyplot as plt  # 绘图库
+
+# 从 clean_data.csv 文件中读取数据到 DataFrame
+df = pd.read_csv('clean_data.csv')
+
+# 将评分转换为整数类型，并将范围从1-5转换为0-4
+df['Rating'] = df['Rating'].astype(int)
+df['Rating'] = df['Rating'] - 1
+
+# 将数据集划分为训练集和验证集，其中验证集占比为10%
+train_df, val_df = train_test_split(df, test_size=0.1, random_state=42)
+
+# 使用 Bert 中文预训练模型的分词器
+tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
+
+# 编码数据
+def encode_reviews(tokenizer, reviews, max_length=256):
+    return tokenizer(reviews, padding='max_length', truncation=True, max_length=max_length, return_tensors='pt')
+
+train_encodings = encode_reviews(tokenizer, train_df['Review'].tolist())
+val_encodings = encode_reviews(tokenizer, val_df['Review'].tolist())
+
+# 定义自定义数据集类
+class MovieReviewDataset(Dataset):
+    def __init__(self, encodings, labels):
+        self.encodings = encodings
+        self.labels = labels
+
+    def __getitem__(self, idx):
+        item = {key: val[idx] for key, val in self.encodings.items()}
+        item['labels'] = torch.tensor(self.labels[idx])
+        return item
+
+    def __len__(self):
+        return len(self.labels)
+
+# 创建训练集和验证集的数据集对象
+train_dataset = MovieReviewDataset(train_encodings, train_df['Rating'].tolist())
+val_dataset = MovieReviewDataset(val_encodings, val_df['Rating'].tolist())
+
+# 加载 Bert 文本分类模型
+model = BertForSequenceClassification.from_pretrained('bert-base-chinese', num_labels=len(df['Rating'].unique()))
+
+# 指定模型运行设备为 GPU（如果可用），否则使用 CPU
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model.to(device)
+
+# 创建训练集和验证集的 DataLoader
+train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=16)
+
+# 定义优化器
+optim = AdamW(model.parameters(), lr=5e-5)
+
+# 训练过程中损失值和验证集精度的记录列表
+train_losses, val_accuracies = [], []
+
+# 训练循环
+steps = 0
+for epoch in range(3):  # 训练3个epoch
+    model.train()  # 设置模型为训练模式
+    train_loss = 0
+    for batch in tqdm(train_loader):  # 遍历训练集的每个批次
+        optim.zero_grad()  # 梯度清零
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
+        labels = batch['labels'].to(device)
+        outputs = model(input_ids, attention_mask=attention_mask, labels=labels)  # 模型前向传播
+        loss = outputs.loss  # 计算损失值
+        loss.backward()  # 反向传播
+        optim.step()  # 更新模型参数
+        train_loss += loss.item()
+        steps += 1
+        if steps % 5 == 0:
+            print(f"Step {steps}, Epoch {epoch + 1}, Current Loss: {loss.item()}")
+
+    train_losses.append(train_loss / len(train_loader))  # 计算并记录训练集损失值
+
+    # 计算验证集精度
+    model.eval()  # 设置模型为评估模式
+    correct_preds = 0
+    total_preds = 0
+    with torch.no_grad():
+        for batch in val_loader:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            labels = batch['labels'].to(device)
+            outputs = model(input_ids, attention_mask=attention_mask)
+            logits = outputs.logits
+            predictions = torch.argmax(logits, dim=-1)
+            correct_preds += (predictions == labels).sum().item()
+            total_preds += labels.size(0)
+
+    val_accuracy = correct_preds / total_preds  # 计算验证集精度
+    val_accuracies.append(val_accuracy)  # 记录验证集精度
+
+    print(f"Epoch {epoch + 1}, Train Loss: {train_loss / len(train_loader)}, Validation Accuracy: {val_accuracy}")
+
+# 绘制损失曲线和验证集精度曲线
+plt.figure(figsize=(12, 5))
+plt.subplot(1, 2, 1)
+plt.plot(train_losses, label='Train Loss')
+plt.title('Loss Curve')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+plt.plot(val_accuracies, label='Validation Accuracy')
+plt.title('Accuracy Curve')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+
+plt.show()
