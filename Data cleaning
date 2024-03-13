@@ -1,0 +1,38 @@
+import pandas as pd  # 导入 pandas 模块，用于数据处理
+import seaborn as sns  # 导入 seaborn 模块，用于绘制统计图表
+import matplotlib.pyplot as plt  # 导入 matplotlib.pyplot 模块，用于绘图
+
+# 读取 CSV 文件中的数据到 DataFrame
+df = pd.read_csv('douban_movie_reviews.csv')
+# 过滤掉评分为'无评分'的行
+df = df[df['Rating'] != '无评分']
+# 删除包含缺失值的行，针对'Rating'列
+df.dropna(subset=['Rating'], inplace=True)
+#从字符串中提取出数字表示的星级
+df['Rating']=df['Rating'].str[7].astype(int)
+# 计算评论长度并添加为新列'Review_length'
+df['Review_length'] = df['Review'].apply(len)
+
+
+###查看Review的字符长度分布
+# 设置 seaborn 的样式为白色网格
+sns.set(style="whitegrid")
+# 创建一个新的图表，指定尺寸为(10, 6)
+plt.figure(figsize=(10, 6))
+# 绘制评论长度的直方图
+sns.distplot(df['Review_length'], kde=False, bins=30, color='blue')  # kde=False 表示不显示核密度估计曲线，bins 控制柱状图的数量
+# 设置图表标题、x轴标签和y轴标签
+plt.title('Review Length Distribution')
+plt.xlabel('Length')
+plt.ylabel('Frequency')
+# 显示图表
+plt.show()
+
+
+# 计算评论长度的 95% 分位数
+length_quantile_95 = df['Review_length'].quantile(0.95)
+print(length_quantile_95)
+
+# 从 DataFrame 中选择'Review'和'Rating'列，并保存到新的 CSV 文件中
+df = df[['Review', 'Rating']]
+df.to_csv('clean_data.csv', index=False, encoding='utf_8')
