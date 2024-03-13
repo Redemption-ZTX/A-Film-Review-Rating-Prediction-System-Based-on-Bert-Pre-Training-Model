@@ -1,0 +1,60 @@
+import time  # 导入时间模块，用于添加爬虫请求之间的延迟
+import requests  # 导入 requests 模块，用于发送 HTTP 请求
+from bs4 import BeautifulSoup  # 从 BeautifulSoup 模块中导入 BeautifulSoup 类，用于解析 HTML
+import pandas as pd  # 导入 pandas 模块，用于数据处理
+from tqdm import tqdm  # 导入 tqdm 模块，用于显示进度条
+
+def get_movie_urls():
+    """获取豆瓣Top 250电影的URL列表"""
+    movie_urls = []  # 创建一个空列表，用于存储电影的URL
+    headers = {  # 请求头，模拟浏览器发送请求
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.99 Safari/537.36',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+    }
+
+    for start in range(0, 250, 25):  # 循环遍历每一页的电影列表
+        url = f'https://movie.douban.com/top250?start={start}'  # 构建每一页的URL
+        response = requests.get(url, headers=headers)  # 发送请求获取页面内容
+        soup = BeautifulSoup(response.text, 'html.parser')  # 使用 BeautifulSoup 解析 HTML
+        movie_tags = soup.find_all('div', class_='hd')  # 找到所有电影链接的标签
+        for tag in movie_tags:
+            movie_urls.append(tag.a['href'])  # 将电影链接添加到列表中
+    return movie_urls
+
+def get_reviews(movie_url, num_reviews=40):
+    """获取一部电影的短评和评分"""
+    reviews = []  # 创建一个空列表，用于存储电影的短评和评分
+    headers = {  # 请求头，模拟浏览器发送请求
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+    }
+    for start in range(0, num_reviews, 20):  # 循环遍历每一页的短评
+        url = f'{movie_url}comments?start={start}'  # 构建每一页短评的URL
+        response = requests.get(url, headers=headers)  # 发送请求获取页面内容
+        soup = BeautifulSoup(response.text, 'html.parser')  # 使用 BeautifulSoup 解析 HTML
+        comment_list = soup.find_all('div', class_='comment')  # 找到所有短评的标签
+        for comment in comment_list:
+            review = comment.p.text.strip()  # 获取短评内容并去除两端空格
+            rating = comment.find('span', class_='rating')  # 找到评分的标签
+            rating = rating['class'][0] if rating else '无评分'  # 获取评分，如果没有评分则设为'无评分'
+            reviews.append((review, rating))  # 将短评和评分添加到列表中
+    return reviews
+
+def main():
+    movie_urls = get_movie_urls()  # 获取豆瓣Top 250电影的URL列表
+    data = []  # 创建一个空列表，用于存储所有电影的短评和评分
+    for url in tqdm(movie_urls):  # 使用 tqdm 显示进度条，遍历所有电影的URL
+        reviews = get_reviews(url)  # 获取每部电影的短评和评分
+        for review, rating in reviews:
+            data.append({  # 将短评、评分和URL添加到列表中
+                'URL': url,
+                'Review': review,
+                'Rating': rating
+            })
+        time.sleep(1)  # 添加延迟，防止爬取过快被封IP
+    df = pd.DataFrame(data)  # 将列表转换为 DataFrame
+    df.to_csv('douban_movie_reviews.csv', index=False, encoding='utf_8')  # 将数据保存到 CSV 文件
+    print("已保存到 CSV 文件。")  # 输出提示信息
+
+if __name__ == "__main__":
+    main()  # 执行主函数
